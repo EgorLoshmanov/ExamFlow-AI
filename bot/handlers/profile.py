@@ -36,9 +36,7 @@ async def profile_button_handler(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "profile")
 async def profile_callback(callback: types.CallbackQuery):
-    """Обработчик кнопки 'Мой прогресс'"""
-    # Перенаправляем на основной хендлер
-    await profile_handler(callback.message)
+    await profile_handler(callback.message, user_id=callback.from_user.id)
     await callback.answer()
 
 def _load_courses_index() -> dict[str, dict]:
@@ -153,11 +151,11 @@ async def _get_readiness(session, user: User, courses_index: dict) -> int:
     return round(readiness * 100)
 
 
-async def profile_handler(message: Message):
+async def profile_handler(message: Message, user_id: int | None = None):
     courses_index = _load_courses_index()
 
     async with async_session() as session:
-        user = await get_user_profile(session, message.from_user.id)
+        user = await get_user_profile(session, user_id or message.from_user.id)
         if user is None:
             await message.answer("Профиль не найден. Напиши /start, чтобы зарегистрироваться.")
             return
@@ -304,9 +302,9 @@ async def profile_handler(message: Message):
 
 
 @router.message(Command("stats"))
-async def stats_handler(message: Message):
+async def stats_handler(message: Message, user_id: int | None = None):
     async with async_session() as session:
-        user = await get_user_profile(session, message.from_user.id)
+        user = await get_user_profile(session, user_id or message.from_user.id)
         if user is None:
             await message.answer("Профиль не найден. Напиши /start.")
             return
@@ -351,5 +349,5 @@ async def stats_handler(message: Message):
 
 @router.callback_query(F.data == "stats_inline")
 async def stats_inline_handler(callback: types.CallbackQuery):
-    await stats_handler(callback.message)
+    await stats_handler(callback.message, user_id=callback.from_user.id)
     await callback.answer()
