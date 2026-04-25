@@ -25,10 +25,12 @@ class User(Base):
     streak_count = Column(Integer, default=0)
     last_activity_date = Column(DateTime, default=datetime.utcnow)
     freeze_available = Column(Boolean, default=False)
-    
+    last_reminder_date = Column(DateTime, nullable=True)
+    last_daily_reward_date = Column(DateTime, nullable=True)
+
     # Прогресс курса
     selected_course = Column(String, nullable=True)
-    current_lesson_id = Column(String, nullable=True)  # ← Добавь это
+    current_lesson_id = Column(String, nullable=True)
     
     progress = relationship("UserProgress", back_populates="user")
     achievements = relationship("UserAchievement", back_populates="user")
@@ -72,24 +74,13 @@ class TaskHistory(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-# bot/database.py
-async def save_user_progress(user_id: int, lesson_id: str, status: str, score: int):
-    async with SessionLocal() as session:
-        progress = await session.get(UserProgress, {"user_id": user_id, "lesson_id": lesson_id})
-        if not progress:
-            progress = UserProgress(user_id=user_id, lesson_id=lesson_id)
-        progress.status = status
-        progress.score = score
-        progress.completed_at = datetime.utcnow() if status == "completed" else None
-        session.add(progress)
-        await session.commit()
-
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # Миграция: добавить колонки, которых может не быть в старой БД
         for column_sql in [
             "ALTER TABLE users ADD COLUMN last_reminder_date DATETIME",
+            "ALTER TABLE users ADD COLUMN last_daily_reward_date DATETIME",
             "ALTER TABLE users ADD COLUMN current_lesson_id VARCHAR",
         ]:
             try:
@@ -97,9 +88,6 @@ async def init_db() -> None:
             except Exception:
                 pass  # колонка уже существует
 
-
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload  # Импортируем
 
 async def get_user_profile(session, telegram_id: int):
     """Получает пользователя с прогрессом и достижениями"""

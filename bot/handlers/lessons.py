@@ -1,6 +1,6 @@
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, date, timezone
 
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
@@ -14,6 +14,7 @@ from services.llm_interface import llm_service
 from services.streak_service import update_streak
 from services.achievements import check_and_award, ACHIEVEMENTS
 from services.course_service import CourseService
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +409,36 @@ async def check_answer(message: types.Message, state: FSMContext):
             score=10 if is_correct else 0,
         ))
         await session.commit()
+
+        today = date.today()
+        start_of_day = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+
+        tasks_today = await session.scalar(
+            select(func.count()).select_from(TaskHistory).where(
+                TaskHistory.user_id == user.id,
+                TaskHistory.created_at >= start_of_day
+            )
+        )
+        lessons_today = await session.scalar(
+            select(func.count()).select_from(UserProgress).where(
+                UserProgress.user_id == user.id,
+                UserProgress.status == "completed",
+                UserProgress.completed_at >= start_of_day
+            )
+        )
+        lessons_today = lessons_today or 0
+
+        if (
+            tasks_today == 5
+            and lessons_today >= 1
+            and (
+                user.last_daily_reward_date is None
+                or user.last_daily_reward_date.date() != today
+            )
+        ):
+            await message.answer("🎉 Дневная норма выполнена! Серия продолжается. +1 день 🔥")
+            user.last_daily_reward_date = datetime.now(timezone.utc)
+            await session.commit()
 
     tasks = data.get("tasks", [])
     current_task_index = data.get("current_task", 0)

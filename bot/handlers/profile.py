@@ -1,19 +1,17 @@
 import json
 import logging
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 
-from aiogram import Router, F
+from aiogram import Router, F, types
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram import types
-from sqlalchemy import select
+from sqlalchemy import select, func
 from database import async_session, get_user_profile, TaskHistory, User
 from services.achievements import ACHIEVEMENTS
-from services.course_service import CourseService  #  Новый импорт
+from services.course_service import CourseService
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +153,6 @@ async def _get_readiness(session, user: User, courses_index: dict) -> int:
     return round(readiness * 100)
 
 
-@router.message(Command("profile"))
-@router.message(F.text == "👤 Профиль")
 async def profile_handler(message: Message):
     courses_index = _load_courses_index()
 
@@ -165,6 +161,25 @@ async def profile_handler(message: Message):
         if user is None:
             await message.answer("Профиль не найден. Напиши /start, чтобы зарегистрироваться.")
             return
+
+        today = date.today()
+
+        lessons_today = sum(
+            1 for p in user.progress
+            if p.status == "completed"
+            and p.completed_at
+            and p.completed_at.date() == today
+        )
+
+        start_of_day = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+        tasks_today = await session.scalar(
+            select(func.count()).select_from(TaskHistory).where(
+                TaskHistory.user_id == user.id,
+                TaskHistory.created_at >= start_of_day
+            )
+        )
+        tasks_today = tasks_today or 0
+
         weak_topics = await _get_weak_topics(session, user)
         readiness_pct = await _get_readiness(session, user, courses_index)
 
@@ -256,7 +271,14 @@ async def profile_handler(message: Message):
     readiness_bar = _progress_bar(readiness_pct, 100)
     readiness_label = _readiness_label(readiness_pct)
 
+    lessons_text = "1/1 ✅" if lessons_today >= 1 else f"{lessons_today}/1"
+    tasks_text = "5/5 ✅" if tasks_today >= 5 else f"{tasks_today}/5"
+
     lines += [
+        f"",
+        f"📅 <b>Сегодня:</b>",
+        f"• Уроков: {lessons_text}",
+        f"• Задач: {tasks_text}",
         f"",
         f"🎯 <b>Готовность к экзамену: {readiness_pct}%</b>",
         f"  {readiness_bar}",
