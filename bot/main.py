@@ -18,6 +18,7 @@ from handlers import lessons, profile, start, reset
 import traceback
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ErrorEvent
 from apscheduler.triggers.cron import CronTrigger
 
 
@@ -57,33 +58,15 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Исправленная сигнатура для aiogram 3.x
 @dp.errors()
-async def error_handler(update, exception: Exception):
+async def error_handler(event: ErrorEvent):
     """Глобальный обработчик необработанных исключений"""
-    
-    # Логируем полный traceback
+    exception = event.exception
+    update = event.update
+
     full_traceback = traceback.format_exception(type(exception), exception, exception.__traceback__)
     logger.error("🚨 Ошибка бота:\n%s", "".join(full_traceback))
-    
-    # Отправляем уведомление админу, если задан ADMIN_CHAT_ID
-    if ADMIN_CHAT_ID:
-        try:
-            error_text = (
-                f"🚨 <b>Ошибка бота</b>\n\n"
-                f"<b>Тип:</b> {type(exception).__name__}\n"
-                f"<b>Сообщение:</b> {str(exception)[:500]}\n"
-                f"<b>Update ID:</b> {getattr(update, 'update_id', 'N/A')}\n\n"
-                f"<i>Полный traceback в логах.</i>"
-            )
-            await bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=error_text,
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.error("Не удалось отправить уведомление админу: %s", e)
-    
+
     return True
 
 
