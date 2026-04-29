@@ -21,6 +21,40 @@ course_service = CourseService()  #  Инициализируем сервис
 COURSES_JSON_PATH = Path(__file__).parent.parent / "data" / "courses.json"
 
 
+def _load_courses_index() -> dict[str, dict]:
+    """Возвращает {course_id: {total_lessons, modules: {module_id: {title, lesson_ids}}}}."""
+    try:
+        with open(COURSES_JSON_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+    index = {}
+    courses_list = data["courses"] if "courses" in data else [data]
+    for course in courses_list:
+        course_id = course.get("course_id")
+        if not course_id:
+            continue
+        modules = {}
+        total = 0
+        for module in course.get("modules", []):
+            lesson_ids = [l["lesson_id"] for l in module.get("lessons", [])]
+            modules[module["module_id"]] = {
+                "title": module["title"],
+                "lesson_ids": lesson_ids,
+            }
+            total += len(lesson_ids)
+        index[course_id] = {
+            "title": course.get("title", "Без названия"),
+            "total_lessons": total,
+            "modules": modules,
+        }
+    return index
+
+
+# Читаем courses.json один раз при импорте модуля
+_COURSES_INDEX: dict[str, dict] = _load_courses_index()
+
 
 @router.message(Command("profile"))
 async def profile_command_handler(message: Message, state: FSMContext):
@@ -38,48 +72,6 @@ async def profile_button_handler(message: Message, state: FSMContext):
 async def profile_callback(callback: types.CallbackQuery):
     await profile_handler(callback.message, user_id=callback.from_user.id)
     await callback.answer()
-
-def _load_courses_index() -> dict[str, dict]:
-    """Возвращает {course_id: {total_lessons, modules: {module_id: {title, lesson_ids}}}}."""
-    try:
-        with open(COURSES_JSON_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-    index = {}
-    
-    # Проверяем формат JSON: новый (с массивом courses) или старый
-    if "courses" in data:
-        # Новый формат: несколько курсов
-        courses_list = data["courses"]
-    else:
-        # Старый формат: один курс
-        courses_list = [data]
-    
-    for course in courses_list:
-        course_id = course.get("course_id")
-        if not course_id:
-            continue
-            
-        modules = {}
-        total = 0
-        for module in course.get("modules", []):
-            lesson_ids = [l["lesson_id"] for l in module.get("lessons", [])]
-            modules[module["module_id"]] = {
-                "title": module["title"],
-                "lesson_ids": lesson_ids,
-            }
-            total += len(lesson_ids)
-        
-        index[course_id] = {
-            "title": course.get("title", "Без названия"),
-            "total_lessons": total,
-            "modules": modules
-        }
-    
-    return index
-
 
 def _streak_bar(streak: int) -> str:
     if streak == 0:
@@ -152,8 +144,6 @@ async def _get_readiness(session, user: User, courses_index: dict) -> int:
 
 
 async def profile_handler(message: Message, user_id: int | None = None):
-    courses_index = _load_courses_index()
-
     async with async_session() as session:
         user = await get_user_profile(session, user_id or message.from_user.id)
         if user is None:
@@ -179,86 +169,22 @@ async def profile_handler(message: Message, user_id: int | None = None):
         tasks_today = tasks_today or 0
 
         weak_topics = await _get_weak_topics(session, user)
-        readiness_pct = await _get_readiness(session, user, courses_index)
+        readiness_pct = await _get_readiness(session, user, _COURSES_INDEX)
 
     # --- Серия дней ---
     streak_line = _streak_bar(user.streak_count)
     freeze_line = "❄️ Заморозка: доступна" if user.freeze_available else "❄️ Заморозка: нет"
 
-    # --- 🔥 Текущий урок (для быстрого продолжения) ---
+    # --- Текущий урок ---
     continue_section = []
-
     if user.current_lesson_id:
         lesson = course_service.get_lesson(user.current_lesson_id)
         if lesson:
             continue_section = [
-                f"",
+                "",
                 f"📍 <b>Следующий урок:</b> {lesson['title']}",
                 f"<i>Модуль: {lesson['module_title']}</i>",
             ]
-
-    # --- Клавиатура быстрых действий ---
-    action_rows = []
-    first_row = []
-    if user.current_lesson_id:
-        first_row.append(InlineKeyboardButton(text="▶️ Продолжить",
-                                              callback_data=f"lesson_{user.current_lesson_id}"))
-    first_row.append(InlineKeyboardButton(text="🎲 Практика", callback_data="quiz_inline"))
-    action_rows.append(first_row)
-    action_rows.append([InlineKeyboardButton(text="📊 Статистика", callback_data="stats_inline")])
-    continue_keyboard = InlineKeyboardMarkup(inline_keyboard=action_rows)
-
-    # --- Прогресс по курсам ---
-    completed_ids: set[str] = {
-        p.lesson_id for p in user.progress if p.status == "completed"
-    }
-    # Группируем выполненные уроки по course_id
-    completed_by_course: dict[str, set[str]] = defaultdict(set)
-    for p in user.progress:
-        if p.status == "completed" and p.course_id:
-            completed_by_course[p.course_id].add(p.lesson_id)
-
-    progress_lines = []
-    for course_id, course_data in courses_index.items():
-        done_total = len(completed_by_course.get(course_id, set()))
-        total = course_data["total_lessons"]
-        progress_lines.append(f"\n📚 {course_data['title']}")
-        for mod_id, mod_data in course_data["modules"].items():
-            done_mod = sum(
-                1 for lid in mod_data["lesson_ids"]
-                if lid in completed_by_course.get(course_id, set())
-            )
-            total_mod = len(mod_data["lesson_ids"])
-            bar = _progress_bar(done_mod, total_mod)
-            progress_lines.append(f"  {mod_data['title']}: {bar}")
-        overall_pct = int(done_total / total * 100) if total else 0
-        progress_lines.append(f"  Итого: {done_total}/{total} ({overall_pct}%)")
-
-    if not progress_lines:
-        progress_lines = ["  Ещё не начато — выбери курс и приступай!"]
-
-    # --- Достижения ---
-    earned_ids = {a.achievement_id for a in user.achievements}
-    achievement_lines = []
-    for ach_id, ach in ACHIEVEMENTS.items():
-        if ach_id in earned_ids:
-            achievement_lines.append(f"  ✅ {ach['emoji']} {ach['title']} — {ach['desc']}")
-        else:
-            achievement_lines.append(f"  ⬜ {ach['emoji']} {ach['title']} — {ach['desc']}")
-
-    earned_count = len(earned_ids)
-    total_count = len(ACHIEVEMENTS)
-
-    # --- Сборка сообщения ---
-    lines = [
-        f"👤 <b>Личный кабинет</b>",
-        f"",
-        f"🔥 <b>Серия дней:</b> {streak_line}",
-        freeze_line,
-    ]
-
-    # 🔥 Добавляем секцию текущего урока
-    lines.extend(continue_section)
 
     # --- Слабые темы ---
     if weak_topics:
@@ -266,39 +192,88 @@ async def profile_handler(message: Message, user_id: int | None = None):
     else:
         weak_lines = ["  Реши задачи, чтобы увидеть слабые темы"]
 
+    # --- Достижения ---
+    earned_ids = {a.achievement_id for a in user.achievements}
+    achievement_lines = []
+    for ach_id, ach in ACHIEVEMENTS.items():
+        mark = "✅" if ach_id in earned_ids else "⬜"
+        achievement_lines.append(f"  {mark} {ach['emoji']} {ach['title']} — {ach['desc']}")
+    earned_count = len(earned_ids)
+    total_count = len(ACHIEVEMENTS)
+
     readiness_bar = _progress_bar(readiness_pct, 100)
     readiness_label = _readiness_label(readiness_pct)
-
     lessons_text = "1/1 ✅" if lessons_today >= 1 else f"{lessons_today}/1"
     tasks_text = "5/5 ✅" if tasks_today >= 5 else f"{tasks_today}/5"
 
-    lines += [
-        f"",
-        f"📅 <b>Сегодня:</b>",
+    # ── Сообщение 1: шапка ──────────────────────────────────────────────────
+    header_lines = [
+        "👤 <b>Личный кабинет</b>",
+        "",
+        f"🔥 <b>Серия дней:</b> {streak_line}",
+        freeze_line,
+    ] + continue_section + [
+        "",
+        "📅 <b>Сегодня:</b>",
         f"• Уроков: {lessons_text}",
         f"• Задач: {tasks_text}",
-        f"",
+        "",
         f"🎯 <b>Готовность к экзамену: {readiness_pct}%</b>",
         f"  {readiness_bar}",
         f"  {readiness_label}",
-        f"",
-        f"📊 <b>Прогресс по курсам:</b>",
-    ] + progress_lines + [
-        f"",
-        f"📉 <b>Слабые темы:</b>",
+        "",
+        "📉 <b>Слабые темы:</b>",
     ] + weak_lines + [
-        f"",
+        "",
         f"🏅 <b>Достижения ({earned_count}/{total_count}):</b>",
     ] + achievement_lines + [
-        f"",
-        f"💡 <b>Команды:</b> /help — справка"
+        "",
+        "💡 <b>Команды:</b> /help — справка",
     ]
 
-    await message.answer(
-        "\n".join(lines),
-        reply_markup=continue_keyboard,
-        parse_mode="HTML"
-    )
+    await message.answer("\n".join(header_lines), parse_mode="HTML")
+
+    # ── Сообщение 2: прогресс по курсам + клавиатура ────────────────────────
+    completed_by_course: dict[str, set[str]] = defaultdict(set)
+    for p in user.progress:
+        if p.status == "completed" and p.course_id:
+            completed_by_course[p.course_id].add(p.lesson_id)
+
+    progress_lines = ["📊 <b>Прогресс по курсам:</b>"]
+    for course_id, course_data in _COURSES_INDEX.items():
+        done_total = len(completed_by_course.get(course_id, set()))
+        total = course_data["total_lessons"]
+        progress_lines.append(f"\n📚 {course_data['title']}")
+        for mod_data in course_data["modules"].values():
+            done_mod = sum(
+                1 for lid in mod_data["lesson_ids"]
+                if lid in completed_by_course.get(course_id, set())
+            )
+            bar = _progress_bar(done_mod, len(mod_data["lesson_ids"]))
+            progress_lines.append(f"  {mod_data['title']}: {bar}")
+        overall_pct = int(done_total / total * 100) if total else 0
+        progress_lines.append(f"  Итого: {done_total}/{total} ({overall_pct}%)")
+
+    if len(progress_lines) == 1:
+        progress_lines.append("  Ещё не начато — выбери курс и приступай!")
+
+    progress_text = "\n".join(progress_lines)
+    if len(progress_text) > 3800:
+        progress_text = progress_text[:3797] + "…"
+
+    # --- Клавиатура быстрых действий ---
+    first_row = []
+    if user.current_lesson_id:
+        first_row.append(InlineKeyboardButton(
+            text="▶️ Продолжить", callback_data=f"lesson_{user.current_lesson_id}"
+        ))
+    first_row.append(InlineKeyboardButton(text="🎲 Практика", callback_data="quiz_inline"))
+    continue_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        first_row,
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="stats_inline")],
+    ])
+
+    await message.answer(progress_text, reply_markup=continue_keyboard, parse_mode="HTML")
 
 
 @router.message(Command("stats"))

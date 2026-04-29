@@ -45,6 +45,18 @@ def _build_final_screen(correct_count: int, total: int, lesson_id: str, has_erro
     return text, InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def _back_to_module_row(lesson: dict) -> list:
+    """Возвращает строку кнопки «↩ К модулю» если у урока есть course_id и module_id."""
+    course_id = lesson.get("course_id")
+    module_id = lesson.get("module_id")
+    if course_id and module_id:
+        return [[InlineKeyboardButton(
+            text="↩ К модулю",
+            callback_data=f"module_{course_id}:{module_id}",
+        )]]
+    return []
+
+
 def _achievement_text(achievement_id: str) -> str:
     ach = ACHIEVEMENTS.get(achievement_id, {})
     emoji = ach.get("emoji", "🏅")
@@ -79,13 +91,13 @@ async def show_lesson(callback: types.CallbackQuery):
             InlineKeyboardButton(text="📝 Хочу практику", callback_data=f"practice_{lesson_id}"),
         ],
     ])
-    
-    # Кнопка видео (если есть ресурсы)
+
     if lesson.get("video_resources"):
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="🎥 Видео по теме", callback_data=f"videos_{lesson_id}")
         ])
-    
+    keyboard.inline_keyboard.extend(_back_to_module_row(lesson))
+
     await callback.message.edit_text(
         text,
         reply_markup=keyboard,
@@ -185,11 +197,11 @@ async def next_lesson(callback: types.CallbackQuery, state: FSMContext):
         ],
     ])
     
-    # Кнопка видео (если есть)
     if lesson.get("video_resources"):
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="🎥 Видео по теме", callback_data=f"videos_{next_lesson_id}")
         ])
+    keyboard.inline_keyboard.extend(_back_to_module_row(lesson))
 
     from aiogram.exceptions import TelegramBadRequest
     try:
@@ -219,10 +231,43 @@ async def ask_ai_explanation(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(LessonState.asking_ai)
 async def handle_ai_question(message: types.Message, state: FSMContext):
+    if message.text and message.text.startswith("/"):
+        cmd = message.text.split()[0].lower()
+        if cmd == "/start":
+            await state.clear()
+            from handlers.start import start
+            await start(message)
+            return
+        if cmd == "/profile":
+            await state.clear()
+            from handlers.profile import profile_handler
+            await profile_handler(message)
+            return
+        if cmd == "/help":
+            from handlers.start import HELP_TEXT
+            await message.answer(HELP_TEXT, parse_mode="Markdown")
+            return
+        if cmd == "/quiz":
+            await state.clear()
+            await quiz_handler(message, state)
+            return
+        if cmd == "/stats":
+            await state.clear()
+            from handlers.profile import stats_handler
+            await stats_handler(message)
+            return
+        if cmd == "/continue":
+            await state.clear()
+            from handlers.start import continue_learning
+            await continue_learning(message)
+            return
+        await message.answer("⚠️ Сначала задай вопрос по теме или нажми ↩ Назад к уроку.")
+        return
+
     data = await state.get_data()
     lesson_id = data.get("lesson_id", "")
-    topic = data.get("topic", lesson_id)  # 🔥 Используем реальную тему
-    
+    topic = data.get("topic", lesson_id)
+
     explanation = await llm_service.explain_topic(
         topic=topic,
         user_question=message.text
@@ -563,6 +608,48 @@ async def back_to_summary(callback: types.CallbackQuery, state: FSMContext):
     text, keyboard = _build_final_screen(correct_count, total, lesson_id, bool(failed_tasks))
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
+
+
+_REVIEWING_HINT = (
+    "📋 Сессия завершена. Выбери действие на экране выше\n"
+    "или напиши /start, /continue, /quiz"
+)
+
+
+@router.message(LessonState.reviewing)
+async def reviewing_fallback(message: types.Message, state: FSMContext):
+    """Любой текст/команда в состоянии reviewing."""
+    if message.text and message.text.startswith("/"):
+        cmd = message.text.split()[0].lower()
+        if cmd == "/start":
+            await state.clear()
+            from handlers.start import start
+            await start(message)
+            return
+        if cmd == "/profile":
+            await state.clear()
+            from handlers.profile import profile_handler
+            await profile_handler(message)
+            return
+        if cmd == "/help":
+            from handlers.start import HELP_TEXT
+            await message.answer(HELP_TEXT, parse_mode="Markdown")
+            return
+        if cmd == "/quiz":
+            await state.clear()
+            await quiz_handler(message, state)
+            return
+        if cmd == "/stats":
+            await state.clear()
+            from handlers.profile import stats_handler
+            await stats_handler(message)
+            return
+        if cmd == "/continue":
+            await state.clear()
+            from handlers.start import continue_learning
+            await continue_learning(message)
+            return
+    await message.answer(_REVIEWING_HINT)
 
 
 @router.message(Command("cancel"))

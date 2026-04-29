@@ -57,8 +57,9 @@ class CourseService:
                     if lesson["lesson_id"] == lesson_id:
                         return {
                             **lesson,
+                            "module_id": module["module_id"],
                             "module_title": module["title"],
-                            "course_id": courses["course_id"]
+                            "course_id": courses["course_id"],
                         }
         # Если несколько курсов
         for course in courses.get("courses", []):
@@ -67,8 +68,9 @@ class CourseService:
                     if lesson["lesson_id"] == lesson_id:
                         return {
                             **lesson,
+                            "module_id": module["module_id"],
                             "module_title": module["title"],
-                            "course_id": course["course_id"]
+                            "course_id": course["course_id"],
                         }
         return None
     

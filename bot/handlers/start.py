@@ -404,6 +404,13 @@ async def continue_learning(message: Message):
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="🎥 Видео по теме", callback_data=f"videos_{lesson_id}")
         ])
+    if lesson.get("course_id") and lesson.get("module_id"):
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text="↩ К модулю",
+                callback_data=f"module_{lesson['course_id']}:{lesson['module_id']}",
+            )
+        ])
 
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
