@@ -2,20 +2,112 @@
 import json
 from pathlib import Path
 from typing import Optional, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CourseService:
-    def __init__(self, courses_path: str = None):
-        if courses_path is None:
-            courses_path = Path(__file__).parent.parent / "data" / "courses.json"
-        self.courses_path = Path(courses_path)
-        self._cache: Optional[dict] = None
+    def __init__(self, json_path: Optional[Path] = None):
+        if json_path is None:
+            json_path = Path(__file__).parent.parent / "data" / "courses.json"
+        
+        self._json_path = json_path
+        self._data = self._load_courses()
+        self._validate_courses()  # Валидация при инициализации
+        self._lesson_index = self._build_lesson_index()
     
     def _load_courses(self) -> dict:
-        """Загружает курсы из JSON (с кэшированием)"""
-        if self._cache is None:
-            with open(self.courses_path, "r", encoding="utf-8") as f:
-                self._cache = json.load(f)
-        return self._cache
+        """Загружает JSON с курсами"""
+        try:
+            with open(self._json_path, encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Файл курсов не найден: {self._json_path}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка JSON в {self._json_path}: {e}")
+            raise
+    
+    def _validate_courses(self) -> None:
+        """Проверяет структуру courses.json"""
+        errors = []
+        lesson_ids = set()
+        
+        # Определяем список курсов
+        courses = self._data.get("courses", [self._data]) if "courses" in self._data else [self._data]
+        
+        for course_idx, course in enumerate(courses):
+            course_path = f"courses[{course_idx}]"
+            
+            # Проверка обязательных полей курса
+            if "course_id" not in course:
+                errors.append(f"{course_path}: отсутствует 'course_id'")
+            if "title" not in course:
+                errors.append(f"{course_path}: отсутствует 'title'")
+            
+            modules = course.get("modules", [])
+            if not modules:
+                errors.append(f"{course_path}: пустой список 'modules'")
+            
+            for mod_idx, module in enumerate(modules):
+                mod_path = f"{course_path}.modules[{mod_idx}]"
+                
+                if "module_id" not in module:
+                    errors.append(f"{mod_path}: отсутствует 'module_id'")
+                if "title" not in module:
+                    errors.append(f"{mod_path}: отсутствует 'title'")
+                
+                lessons = module.get("lessons", [])
+                if not lessons:
+                    errors.append(f"{mod_path}: пустой список 'lessons'")
+                
+                for lesson_idx, lesson in enumerate(lessons):
+                    lesson_path = f"{mod_path}.lessons[{lesson_idx}]"
+                    
+                    # Проверка обязательных полей урока
+                    for field in ["lesson_id", "title", "content", "summary"]:
+                        if field not in lesson:
+                            errors.append(f"{lesson_path}: отсутствует '{field}'")
+                    
+                    # Проверка уникальности lesson_id
+                    lesson_id = lesson.get("lesson_id")
+                    if lesson_id:
+                        if lesson_id in lesson_ids:
+                            errors.append(f"{lesson_path}: дубликат lesson_id '{lesson_id}'")
+                        lesson_ids.add(lesson_id)
+                    
+                    # Проверка длины content
+                    content = lesson.get("content", "")
+                    if len(content) < 50:
+                        errors.append(f"{lesson_path}: content слишком короткий ({len(content)} симв.)")
+        
+        if errors:
+            logger.error("🚨 Ошибки валидации courses.json:\n%s", "\n".join(errors))
+            raise ValueError(f"Невалидный courses.json: {len(errors)} ошибок")
+        
+        logger.info("✅ courses.json успешно пройден валидацию (%d уроков)", len(lesson_ids))
+    
+    def _build_lesson_index(self) -> dict:
+        """Строит индекс уроков для быстрого поиска"""
+        index = {}
+        courses = self._data.get("courses", [self._data]) if "courses" in self._data else [self._data]
+        
+        for course in courses:
+            course_id = course.get("course_id", "unknown")
+            for module in course.get("modules", []):
+                module_id = module.get("module_id", "unknown")
+                module_title = module.get("title", "Без названия")
+                
+                for lesson in module.get("lessons", []):
+                    lesson_id = lesson.get("lesson_id")
+                    if lesson_id:
+                        index[lesson_id] = {
+                            "course_id": course_id,
+                            "module_id": module_id,
+                            "module_title": module_title,
+                            **lesson
+                        }
+        return index
     
     def get_all_courses(self) -> List[dict]:
         """Возвращает список всех курсов (для главного меню)"""

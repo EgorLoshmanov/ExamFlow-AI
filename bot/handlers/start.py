@@ -21,9 +21,14 @@ def build_main_keyboard(courses: list) -> ReplyKeyboardMarkup:
     for course in courses:
         title = course.get("title", course.get("course_id", "Курс"))
         keyboard.append([KeyboardButton(text=f"🚀 {title}")])
-    keyboard.append([KeyboardButton(text="👤 Профиль"), KeyboardButton(text="ℹ️ Помощь")])
+    
+    # Добавляем кнопку "▶️ Продолжить" в ряд с Профилем и Помощью
+    keyboard.append([
+        KeyboardButton(text="👤 Профиль"),
+        KeyboardButton(text="▶️ Продолжить"),  # Новая кнопка
+        KeyboardButton(text="ℹ️ Помощь")
+    ])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
 
 def build_inline_course_keyboard(courses: list) -> InlineKeyboardMarkup:
     """Строит inline-клавиатуру для выбора курса"""
@@ -34,19 +39,22 @@ def build_inline_course_keyboard(courses: list) -> InlineKeyboardMarkup:
         keyboard.append([
             InlineKeyboardButton(text=f"🚀 {title}", callback_data=f"course_{course_id}")
         ])
+    
+    # Добавляем inline-кнопку "▶️ Продолжить"
     keyboard.append([
         InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
+        InlineKeyboardButton(text="▶️ Продолжить", callback_data="continue_inline"),  # ← Новая кнопка
         InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help_inline")
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 
 HELP_TEXT = """
 📚 **Быстрая справка:**
 
 **🎓 Обучение:**
-/start — Главное меню и выбор курс
+/start — Главное меню и выбор курса
 /continue — Продолжить с последнего урока 📍
+▶️ Продолжить — Кнопка в главном меню (то же, что /continue)
 /reset — Сбросить прогресс текущего курса ⚠️
 /profile — Твой прогресс и статистика 🔥
 /stats — Статистика ответов на задачи 📊
@@ -56,7 +64,7 @@ HELP_TEXT = """
 /help — Эта справка
 /ask <вопрос> — Спросить ИИ-репетитора 🤖
 
-** Как учиться:**
+**💡 Как учиться:**
 1. Выбери курс в меню
 2. Читай теорию и смотри видео
 3. Решай задачи (вводи ответ числом)
@@ -106,6 +114,63 @@ async def help_callback_handler(callback: types.CallbackQuery):
     """Обработчик справки для inline-кнопки"""
     await callback.message.answer(HELP_TEXT, parse_mode="Markdown")
     await callback.answer()  # Просто закрываем "часики" на кнопке
+
+
+# Обработчик inline-кнопки "▶️ Продолжить"
+@router.callback_query(F.data == "continue_inline")
+async def continue_inline_handler(callback: types.CallbackQuery):
+    """Продолжение обучения через inline-кнопку"""
+    async with async_session() as session:
+        user = await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
+    
+    if not user.current_lesson_id:
+        await callback.answer("📚 Ты ещё не начал обучение. Выбери курс!", show_alert=True)
+        return
+    
+    # Перенаправляем на показ урока (код как в continue_learning)
+    lesson = course_service.get_lesson(user.current_lesson_id)
+    if not lesson:
+        await callback.answer("⚠️ Урок не найден", show_alert=True)
+        return
+    
+    # Отправляем урок как новое сообщение (не edit, чтобы не ломать inline)
+    text = f"📚 <b>{escape(lesson['title'])}</b>\n"
+    text += f"<i>Модуль: {escape(lesson['module_title'])}</i>\n\n"
+    text += escape(lesson["content"])
+    text += f"\n\n💡 <b>Главное за 1 минуту:</b>\n{escape(lesson['summary'])}"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Понял, дальше", callback_data=f"next_lesson_{user.current_lesson_id}"),
+            InlineKeyboardButton(text="❓ Не понял", callback_data=f"ask_ai_{user.current_lesson_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="📝 Хочу практику", callback_data=f"practice_{user.current_lesson_id}"),
+        ],
+    ])
+    if lesson.get("video_resources"):
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text="🎥 Видео по теме", callback_data=f"videos_{user.current_lesson_id}")
+        ])
+    
+    await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+# Обработчик текстовой кнопки "▶️ Продолжить"
+@router.message(F.text == "▶️ Продолжить")
+async def continue_button_handler(message: Message):
+    """Продолжение обучения через текстовую кнопку в главном меню"""
+    async with async_session() as session:
+        user = await get_or_create_user(session, message.from_user.id, message.from_user.username)
+    
+    if not user.current_lesson_id:
+        await message.answer("📚 Ты ещё не начал обучение. Выбери курс в /start")
+        return
+    
+    # Перенаправляем на существующую функцию continue_learning
+    await continue_learning(message)
+
 
 
 def _build_course_modules_text_keyboard(course: dict, course_id: str) -> tuple[str, InlineKeyboardMarkup]:

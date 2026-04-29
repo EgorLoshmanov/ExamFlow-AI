@@ -8,6 +8,8 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command, StateFilter
 
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+
 
 from database import async_session, get_or_create_user, get_user_profile, UserProgress, TaskHistory
 from services.llm_interface import llm_service
@@ -227,6 +229,30 @@ async def ask_ai_explanation(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await callback.answer()
+
+@router.message(Command("continue"))
+@router.message(F.text == "/continue")
+async def continue_learning(message: Message):
+    """Продолжить с последнего урока"""
+    async with async_session() as session:
+        user = await get_or_create_user(session, message.from_user.id, message.from_user.username)
+    
+    if not user.current_lesson_id:
+        await message.answer(
+            "📚 Ты ещё не начал обучение.\n\n"
+            "Выбери курс в главном меню (/start)."
+        )
+        return
+    
+    lesson = course_service.get_lesson(user.current_lesson_id)
+    if not lesson:
+        await message.answer("⚠️ Урок не найден. Начни заново: /start")
+        return
+    
+    # Показываем урок (код как в show_lesson)
+    text = f"📚 <b>{escape(lesson['title'])}</b>\n..."
+    await message.answer(text, parse_mode="HTML")
+
 
 
 @router.message(LessonState.asking_ai)
