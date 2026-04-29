@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -8,6 +9,7 @@ from groq import AsyncGroq
 logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+_LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "15"))
 
 
 class LLMService(ABC):
@@ -40,14 +42,17 @@ class GroqLLMService(LLMService):
         self._model = model
 
     async def _request(self, system_prompt: str, user_prompt: str, temperature: float = 0.5) -> str:
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            max_tokens=1000,
+        response = await asyncio.wait_for(
+            self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=1000,
+            ),
+            timeout=_LLM_TIMEOUT,
         )
         return response.choices[0].message.content
 
@@ -60,6 +65,9 @@ class GroqLLMService(LLMService):
         user = f"Тема: {topic}\nВопрос ученика: {user_question}"
         try:
             return await self._request(system, user, temperature=0.4)
+        except asyncio.TimeoutError:
+            logger.error("Groq explain_topic timeout")
+            return "⏳ ИИ-репетитор не отвечает. Попробуй через минуту."
         except Exception as e:
             logger.error("Groq explain_topic error: %s", e)
             return "Не удалось получить объяснение. Попробуй позже."
@@ -78,6 +86,8 @@ class GroqLLMService(LLMService):
             tasks = json.loads(raw)
             if isinstance(tasks, list) and tasks:
                 return tasks
+        except asyncio.TimeoutError:
+            logger.error("Groq generate_tasks timeout")
         except Exception as e:
             logger.error("Groq generate_tasks error: %s", e)
         return []
@@ -102,6 +112,9 @@ class GroqLLMService(LLMService):
                 "feedback": result.get("feedback", ""),
                 "score": 10 if result.get("is_correct") else 0,
             }
+        except asyncio.TimeoutError:
+            logger.error("Groq check_solution timeout")
+            return {"is_correct": False, "feedback": "Не удалось проверить — попробуй ещё раз.", "score": 0}
         except Exception as e:
             logger.error("Groq check_solution error: %s", e)
             return {"is_correct": False, "feedback": "Не удалось проверить ответ. Попробуй позже.", "score": 0}
@@ -116,6 +129,9 @@ class GroqLLMService(LLMService):
         user = f"Задача: {task['question']}"
         try:
             return await self._request(system, user, temperature=0.4)
+        except asyncio.TimeoutError:
+            logger.error("Groq get_hint timeout")
+            return "⏳ ИИ-репетитор не отвечает. Попробуй через минуту."
         except Exception as e:
             logger.error("Groq get_hint error: %s", e)
             return "Не удалось получить подсказку. Попробуй позже."

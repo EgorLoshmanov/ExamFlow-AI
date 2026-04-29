@@ -272,10 +272,12 @@ async def start_practice(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(Command("quiz"))
-async def quiz_handler(message: types.Message, state: FSMContext):
+async def quiz_handler(message: types.Message, state: FSMContext, user_id: int | None = None):
     """Быстрая практика по случайной теме текущего курса"""
     async with async_session() as session:
-        user = await get_or_create_user(session, message.from_user.id, message.from_user.username)
+        uid = user_id or message.from_user.id
+        uname = None if user_id else message.from_user.username
+        user = await get_or_create_user(session, uid, uname)
         selected_course = user.selected_course
 
     if not selected_course:
@@ -302,7 +304,7 @@ async def quiz_handler(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data == "quiz_inline")
 async def quiz_inline_handler(callback: types.CallbackQuery, state: FSMContext):
-    await quiz_handler(callback.message, state)
+    await quiz_handler(callback.message, state, user_id=callback.from_user.id)
     await callback.answer()
 
 

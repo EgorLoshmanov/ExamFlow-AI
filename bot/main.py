@@ -12,7 +12,6 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 from aiogram import Bot, Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from services.reminder_service import send_streak_reminders
 from handlers import lessons, profile, start, reset
 
 import traceback
@@ -34,23 +33,18 @@ dp = Dispatcher()
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import select
 from database import async_session, User
 from services.streak_service import check_streak_loss
 
 async def send_streak_reminders(bot):
-    """Ежедневная проверка серий (в 22:00)"""
+    """Ежедневная проверка серий (в 19:00): уведомления о сгорании и заморозке."""
     async with async_session() as session:
-        users = await session.execute(select(User))
-        users = users.scalars().all()
-        
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+
         for user in users:
-            if user.streak_count > 0:
-                lost = await check_streak_loss(session, user)
-                if lost:
-                    await bot.send_message(
-                        user.telegram_id,
-                        "Твоя серия сгорела! Начни заниматься снова, чтобы не потерять прогресс."
-                    )
+            await check_streak_loss(session, user, bot=bot)
 
 
 load_dotenv()
