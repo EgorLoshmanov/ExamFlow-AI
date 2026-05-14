@@ -5,12 +5,13 @@ from aiogram import Bot
 from sqlalchemy import select
 
 from database import async_session, User
+from services.streak_service import check_streak_loss
 
 logger = logging.getLogger(__name__)
 
 
-async def send_streak_reminders(bot: Bot) -> None:
-    """Отправляет напоминание пользователям, у которых есть серия, но они ещё не занимались сегодня."""
+async def send_daily_reminders(bot: Bot) -> None:
+    """Отправляет напоминание пользователям с активной серией, которые не занимались сегодня."""
     today = datetime.now(timezone.utc).date()
 
     async with async_session() as session:
@@ -50,3 +51,17 @@ async def send_streak_reminders(bot: Bot) -> None:
         if sent:
             await session.commit()
             logger.info("Напоминания о серии отправлены: %d пользователей", sent)
+
+
+async def check_all_streaks(bot: Bot) -> None:
+    """Ежедневная задача планировщика (19:00):
+    1. Проверяет сгорание/заморозку серий у всех пользователей.
+    2. Отправляет напоминания тем, кто ещё не занимался сегодня.
+    """
+    async with async_session() as session:
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+        for user in users:
+            await check_streak_loss(session, user, bot=bot)
+
+    await send_daily_reminders(bot)

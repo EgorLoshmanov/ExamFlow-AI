@@ -31,21 +31,7 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 dp = Dispatcher()
 
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
-from database import async_session, User
-from services.streak_service import check_streak_loss
-
-async def send_streak_reminders(bot):
-    """Ежедневная проверка серий (в 19:00): уведомления о сгорании и заморозке."""
-    async with async_session() as session:
-        result = await session.execute(select(User))
-        users = result.scalars().all()
-
-        for user in users:
-            await check_streak_loss(session, user, bot=bot)
-
+from services.reminder_service import check_all_streaks
 
 load_dotenv()
 
@@ -90,7 +76,7 @@ async def main():
     # Планировщик
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
-        send_streak_reminders,
+        check_all_streaks,
         "cron",
         hour=19,
         minute=0,
