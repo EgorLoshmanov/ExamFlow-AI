@@ -109,6 +109,8 @@ async def _get_weak_topics(session, user: User, min_attempts: int = 2, top_n: in
         if total < min_attempts:
             continue
         percent = round(corrects[lesson_id] / total * 100)
+        if percent == 100:
+            continue
         lesson = course_service.get_lesson(lesson_id)
         title = lesson["title"] if lesson else lesson_id
         stats.append((title, percent))
@@ -226,10 +228,7 @@ async def profile_handler(message: Message, user_id: int | None = None):
     ] + weak_lines + [
         "",
         f"🏅 <b>Достижения ({earned_count}/{total_count}):</b>",
-    ] + achievement_lines + [
-        "",
-        "💡 <b>Команды:</b> /help — справка",
-    ]
+    ] + achievement_lines
 
     await message.answer("\n".join(header_lines), parse_mode="HTML")
 

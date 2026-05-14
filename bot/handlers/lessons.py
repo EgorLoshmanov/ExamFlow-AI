@@ -30,6 +30,16 @@ class LessonState(StatesGroup):
     reviewing = State()
 
 
+def _result_label(percent: int) -> str:
+    if percent < 30:
+        return "Только начало пути"
+    if percent < 60:
+        return "Хороший прогресс"
+    if percent <= 85:
+        return "Ты почти готов"
+    return "Отличная форма!"
+
+
 def _build_final_screen(correct_count: int, total: int, lesson_id: str, has_errors: bool) -> tuple[str, InlineKeyboardMarkup]:
     incorrect_count = total - correct_count
     percent = round(correct_count / total * 100)
@@ -37,7 +47,7 @@ def _build_final_screen(correct_count: int, total: int, lesson_id: str, has_erro
         f"🎉 <b>Сессия завершена!</b>\n\n"
         f"✅ Правильно: {correct_count}/{total}\n"
         f"❌ Неправильно: {incorrect_count}/{total}\n"
-        f"🏆 Результат: {percent}%"
+        f"🏆 Результат: {percent}% — {_result_label(percent)}"
     )
     buttons = []
     if has_errors:
@@ -75,7 +85,7 @@ async def show_lesson(callback: types.CallbackQuery):
 
     lesson = course_service.get_lesson(lesson_id)
     if not lesson:
-        await callback.answer("❌ Урок не найден", show_alert=True)
+        await callback.answer("❌ Урок не найден. Начни с /start", show_alert=True)
         return
 
     text = f"📚 <b>{escape(lesson['title'])}</b>\n"
@@ -525,7 +535,7 @@ async def check_answer(message: types.Message, state: FSMContext):
         if wrong_attempts >= 3:
             await state.update_data(wrong_attempts=0)
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Следующая задача", callback_data="next_task")]
+                [InlineKeyboardButton(text="⏭ Пропустить задачу", callback_data="next_task")]
             ])
             await message.answer(
                 f"❌ {result['feedback']}\n\n"

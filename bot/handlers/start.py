@@ -60,18 +60,15 @@ HELP_TEXT = """
 /stats — Статистика ответов на задачи 📊
 /quiz — Быстрая практика по случайной теме 🎲
 
-**❓ Помощь:**
-/help — Эта справка
-/ask <вопрос> — Спросить ИИ-репетитора 🤖
-
 **💡 Как учиться:**
 1. Выбери курс в меню
 2. Читай теорию и смотри видео
-3. Решай задачи (вводи ответ числом)
+3. Решай задачи — вводи ответ текстом (например: «3», «x=2», «нет»)
 4. Поддерживай серию дней! 🔥
 
 **Застрял?**
 Нажми «❓ Не понял» под уроком — ИИ объяснит тему.
+/help — Эта справка
 """
 
 
@@ -135,9 +132,9 @@ async def continue_inline_handler(callback: types.CallbackQuery):
     # Перенаправляем на показ урока (код как в continue_learning)
     lesson = course_service.get_lesson(user.current_lesson_id)
     if not lesson:
-        await callback.answer("⚠️ Урок не найден", show_alert=True)
+        await callback.answer("⚠️ Урок не найден. Начни с /start", show_alert=True)
         return
-    
+
     # Отправляем урок как новое сообщение (не edit, чтобы не ломать inline)
     text = f"📚 <b>{escape(lesson['title'])}</b>\n"
     text += f"<i>Модуль: {escape(lesson['module_title'])}</i>\n\n"
@@ -218,7 +215,7 @@ async def show_course_modules(callback):
         await callback.message.edit_text(
             f"⚠️ <b>Сменить курс?</b>\n\n"
             f"Прогресс по текущему курсу сохранится, "
-            f"но серия уроков начнётся заново.",
+            f"но позиция урока сбросится.",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
