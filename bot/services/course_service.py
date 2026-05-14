@@ -111,20 +111,13 @@ class CourseService:
     
     def get_all_courses(self) -> List[dict]:
         """Возвращает список всех курсов (для главного меню)"""
-        courses = self._load_courses()
-        # Если в JSON один курс — возвращаем его в списке
-        if "course_id" in courses:
-            return [courses]
-        
-        # Если несколько курсов (новый формат)
-        return courses.get("courses", [courses])
+        return self._data.get("courses", [self._data])
     
     def get_course_by_id(self, course_id: str) -> Optional[dict]:
         """Находит курс по ID"""
-        courses = self._load_courses()
-        if courses.get("course_id") == course_id:
-            return courses
-        for course in courses.get("courses", []):
+        if self._data.get("course_id") == course_id:
+            return self._data
+        for course in self._data.get("courses", []):
             if course.get("course_id") == course_id:
                 return course
         return None
@@ -141,30 +134,7 @@ class CourseService:
     
     def get_lesson(self, lesson_id: str) -> Optional[dict]:
         """Находит урок по ID в любом модуле курса"""
-        courses = self._load_courses()
-        # Если один курс в JSON
-        if "course_id" in courses:
-            for module in courses.get("modules", []):
-                for lesson in module.get("lessons", []):
-                    if lesson["lesson_id"] == lesson_id:
-                        return {
-                            **lesson,
-                            "module_id": module["module_id"],
-                            "module_title": module["title"],
-                            "course_id": courses["course_id"],
-                        }
-        # Если несколько курсов
-        for course in courses.get("courses", []):
-            for module in course.get("modules", []):
-                for lesson in module.get("lessons", []):
-                    if lesson["lesson_id"] == lesson_id:
-                        return {
-                            **lesson,
-                            "module_id": module["module_id"],
-                            "module_title": module["title"],
-                            "course_id": course["course_id"],
-                        }
-        return None
+        return self._lesson_index.get(lesson_id)
     
     def get_lesson_topic(self, lesson_id: str) -> str:
         """Возвращает понятную тему для ИИ (не сырой ID)"""
@@ -186,29 +156,9 @@ class CourseService:
 
     def get_next_lesson_id(self, current_lesson_id: str) -> Optional[str]:
         """Находит ID следующего урока или None, если курс завершён"""
-        courses = self._load_courses()
         found_module = False
-        
-        # Если один курс в JSON
-        if "course_id" in courses:
-            for module in courses.get("modules", []):
-                lessons = module.get("lessons", [])
-                for i, lesson in enumerate(lessons):
-                    if lesson["lesson_id"] == current_lesson_id:
-                        if i + 1 < len(lessons):
-                            return lessons[i + 1]["lesson_id"]
-                        found_module = True
-                        break
-                if found_module:
-                    module_idx = courses["modules"].index(module)
-                    if module_idx + 1 < len(courses["modules"]):
-                        next_module = courses["modules"][module_idx + 1]
-                        if next_module.get("lessons"):
-                            return next_module["lessons"][0]["lesson_id"]
-                    return None
-        
-        # Если несколько курсов
-        for course in courses.get("courses", []):
+
+        for course in self._data.get("courses", [self._data]):
             for module in course.get("modules", []):
                 lessons = module.get("lessons", [])
                 for i, lesson in enumerate(lessons):
@@ -224,5 +174,5 @@ class CourseService:
                         if next_module.get("lessons"):
                             return next_module["lessons"][0]["lesson_id"]
                     return None
-        
+
         return None
