@@ -94,11 +94,16 @@ async def start(message: Message):
             "📚 Выбери курс → читай теорию → решай задачи\n"
             "🔥 Занимайся каждый день — строй серию\n"
             "🤖 Жми «Не понял» — ИИ объяснит тему\n"
-            "🏆 Зарабатывай достижения и следи за прогрессом"
+            "🏆 Зарабатывай достижения и следи за прогрессом",
+            reply_markup=build_main_keyboard(courses),
         )
         welcome_text = f"Привет, {message.from_user.first_name}! Выбери курс, чтобы начать:"
     else:
-        welcome_text = f"С возвращением, {message.from_user.first_name}! Выбери курс:"
+        await message.answer(
+            f"С возвращением, {message.from_user.first_name}!",
+            reply_markup=build_main_keyboard(courses),
+        )
+        welcome_text = "Выбери курс:"
 
     await message.answer(welcome_text, reply_markup=build_inline_course_keyboard(courses))
 
